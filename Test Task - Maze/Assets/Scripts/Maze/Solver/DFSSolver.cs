@@ -1,16 +1,23 @@
-﻿using System.Collections;
+﻿using System;
+using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
+using Random = UnityEngine.Random;
 
 namespace RFTestTaskMaze.MazeSolver
 {
     public class DFSSolver : IMazeSolver
     {
-        private IGridManager _gridMan;
+        private IMazeManager _mazeMan;
+        private ICameraManager _cameraMan;
+        private Action<List<Tile>> _onSolutionFound;
         
-        public IEnumerator SolveMaze(IGridManager gridManager, Vector2Int startingPosition)
+        public IEnumerator SolveMaze(IMazeManager mazeManager, Vector2Int startingPosition, Action<List<Tile>> onSolutionFound)
         {
-            _gridMan = gridManager;
+            _mazeMan = mazeManager;
+            _cameraMan = Services.Get<ICameraManager>();
+            _onSolutionFound = onSolutionFound;
 
             Stack<Tile> tileStack = new Stack<Tile>();
             Vector2Int position = startingPosition;
@@ -20,7 +27,7 @@ namespace RFTestTaskMaze.MazeSolver
             
             Debug.LogFormat("START @ {0}", startingPosition);
 
-            if (_gridMan.TryGetTile(position, out Tile startTile))
+            if (_mazeMan.TryGetTile(position, out Tile startTile))
             {
                 tileStack.Push(startTile);
             }
@@ -30,50 +37,49 @@ namespace RFTestTaskMaze.MazeSolver
             {
                 Tile tile = tileStack.Pop();
             
-                _gridMan.SetCameraTarget(tile.Position);
+                _cameraMan.SetTarget(tile.Position);
                 
                 if (!visited.ContainsKey(tile.Position))
                 {
-                    if (IsExit(tile))
+                    if (tile.IsExit)
                     {
-                        OnSolved(visited, tile);
+                        OnSolved(visited, lookedAt, tile);
                         break;
                     }
-                    tile.ChangeSelectionColor(Color.red);
+                    
+                    if (tile != startTile) tile.ChangeSelectionColor(Color.red);
                     tile.ToggleSelected(true);
 
                     visited[tile.Position] = tile;
 
                     int turnDirection = Random.Range(0, 2) == 1 ? 1 : -1;
-                    
                     for (int i = 0; i < 4; i++)
                     {
                         Direction dir = (Direction) ((i * turnDirection + 4) % 4);
                         
                         if (!tile.CanMoveToward(dir)) continue;
-                        if (!_gridMan.TryGetTile(tile.Position + dir.ToDirectionVector(), out Tile neighbor)) continue;
+                        if (!_mazeMan.TryGetTile(tile.Position + dir.ToDirectionVector(), out Tile neighbor)) continue;
                         if (visited.ContainsKey(neighbor.Position)) continue;
 
-                        // check down the corridor if exit is visible
+                        // check down the corridor if exit is visible from current position
                         Tile n = neighbor;
                         while (n.CanMoveToward(dir))
                         {
                             yield return null;
-                            if (IsExit(n))
+                            if (n.IsExit)
                             {
-                                OnSolved(visited, n);
+                                OnSolved(visited, lookedAt, n);
                                 exitFound = true;
                                 break;
                             }
                             
-                            n.ChangeSelectionColor(new Color(1f, 0.74f, 0f));
+                            if (n != startTile) n.ChangeSelectionColor(new Color(1f, 0.74f, 0f));
                             n.ToggleSelected(true, false);
                         
                             lookedAt[n.Position] = n;
                             
-                            if (!_gridMan.TryGetTile(n.Position + dir.ToDirectionVector(), out n) || lookedAt.ContainsKey(n.Position)) break;
+                            if (!_mazeMan.TryGetTile(n.Position + dir.ToDirectionVector(), out n) || lookedAt.ContainsKey(n.Position)) break;
                         }
-                        
                         if (exitFound) break;
                         
                         tileStack.Push(neighbor);
@@ -81,25 +87,19 @@ namespace RFTestTaskMaze.MazeSolver
                 }
                 yield return null;
             }
-            
-            
-            yield return null;
         }
 
-        private void OnSolved(Dictionary<Vector2Int, Tile> visited, Tile tile)
+        private void OnSolved(Dictionary<Vector2Int, Tile> visited, Dictionary<Vector2Int, Tile> lookedAt, Tile tile)
         {
-            _gridMan.SetCameraTarget(new Vector2(_gridMan.Width / 2f, _gridMan.Height / 2f));
-            _gridMan.SetCameraZoom(_gridMan.Height / 2f);
-            float solutionPercent = visited.Count / (float) (_gridMan.Width * _gridMan.Height);
+            _cameraMan.Recenter();
+            
+            List<Tile> affectedTiles = visited.Select(x => x.Value).ToList();
+            affectedTiles.AddRange(lookedAt.Where(x => !affectedTiles.Contains(x.Value)).Select(x => x.Value).ToList());
+            
+            float solutionPercent = affectedTiles.Count / (float) (_mazeMan.Width * _mazeMan.Height);
             Debug.LogFormat("DONE! {0} found exit @ {1} [solution covered {2:F2}% of maze]", GetType().Name, tile, solutionPercent * 100);
-        }
-
-        private bool IsExit(Tile tile)
-        {
-            return tile.Position.x == 0 && tile.CanMoveToward(Direction.Left)
-                   || tile.Position.y == 0 && tile.CanMoveToward(Direction.Down)
-                   || tile.Position.x == _gridMan.Width - 1 && tile.CanMoveToward(Direction.Right)
-                   || tile.Position.y == _gridMan.Height - 1 && tile.CanMoveToward(Direction.Up);
+            
+            _onSolutionFound?.Invoke(affectedTiles);
         }
     }
 }

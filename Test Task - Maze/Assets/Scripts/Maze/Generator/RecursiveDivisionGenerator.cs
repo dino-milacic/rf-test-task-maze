@@ -1,6 +1,7 @@
 ﻿using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using Random = UnityEngine.Random;
 
 namespace RFTestTaskMaze
 {
@@ -9,11 +10,19 @@ namespace RFTestTaskMaze
         private int _verticalCounter;
         private int _horizontalCounter;
 
-        private IGridManager _gridManager;
+        private IMazeManager _mazeManager;
+        private ICameraManager _cameraManager;
 
-        public IEnumerator GenerateMaze(IGridManager gridManager, int width, int height)
+        private enum CutAxis
         {
-            _gridManager = gridManager;
+            Horizontal,
+            Vertical
+        }
+
+        public IEnumerator GenerateMaze(IMazeManager mazeManager, int width, int height)
+        {
+            _mazeManager = mazeManager;
+            _cameraManager = Services.Get<ICameraManager>();
             
             _verticalCounter = 0;
             _horizontalCounter = 0;
@@ -21,60 +30,24 @@ namespace RFTestTaskMaze
             RectInt field = new RectInt(0, 0, width, height);
             
             yield return SubdivideMaze(GetRandomCutAxis(field), field);
-            _gridManager.HighlightSubfield(new RectInt());
-            CreateExits(width, height);
-        }
-
-        private void CreateExits(int width, int height)
-        {
-            int bottomX = Random.Range(0, width);
-            int topX = Random.Range(0, width);
-            int leftY = Random.Range(0, height);
-            int rightY = Random.Range(0, height);
-
-            if (_gridManager.TryGetTile(bottomX, 0, out Tile bottomExit))
-            {
-                bottomExit.BreakDownWall(Direction.Down);
-                bottomExit.ChangeSelectionColor(Color.magenta);
-                bottomExit.ToggleSelected(true);
-            }
-
-            if (_gridManager.TryGetTile(topX, height - 1, out Tile topExit))
-            {
-                topExit.BreakDownWall(Direction.Up);
-                topExit.ChangeSelectionColor(Color.magenta);
-                topExit.ToggleSelected(true);
-            }
-
-            if (_gridManager.TryGetTile(0, leftY, out Tile leftExit))
-            {
-                leftExit.BreakDownWall(Direction.Left);
-                leftExit.ChangeSelectionColor(Color.magenta);
-                leftExit.ToggleSelected(true);
-            }
-
-            if (_gridManager.TryGetTile(width - 1, rightY, out Tile rightExit))
-            {
-                rightExit.BreakDownWall(Direction.Right);
-                rightExit.ChangeSelectionColor(Color.magenta);
-                rightExit.ToggleSelected(true);
-            }
+            _mazeManager.HighlightSubfield(new RectInt());
+            
+            _cameraManager.Recenter();
         }
 
         private IEnumerator SubdivideMaze(CutAxis cutAxis, RectInt subfield)
         {
-            bool isSubdivisionVertical = cutAxis == CutAxis.Vertical;
-            if (subfield.width > 5 || subfield.height > 5) _gridManager.HighlightSubfield(subfield);
+            if (subfield.width < 2 || subfield.height < 2) yield break;
             
-            if (subfield.width < 2 || subfield.height < 2)
+            // add some visual flair when animating...
+            if (subfield.width > 5 || subfield.height > 5)
             {
-                // _gridManager.HighlightSubfield(new RectInt()); // effectively removes highlight
-                yield break;
+                _mazeManager.HighlightSubfield(subfield);
+                _cameraManager.SetTarget(subfield.center);
+                _cameraManager.SetZoom(subfield.height / 2f);
             }
-            
-            _gridManager.SetCameraTarget(subfield.center);
-            _gridManager.SetCameraZoom(subfield.height / 2f);
 
+            bool isSubdivisionVertical = cutAxis == CutAxis.Horizontal;
             if (isSubdivisionVertical) // cutting the field vertically into a upper and lower subfield
             {
                 // decide the cut row
@@ -134,6 +107,7 @@ namespace RFTestTaskMaze
         {
             Direction direction = Direction.Down;
 
+            // decide how many times and where to punch some holes in the future wall
             List<int> doorColumns = new List<int>();
             int numberOfDoors = Random.Range(Mathf.Max(1, field.width / 25), field.width / 10);
             for (int i = 0; i < numberOfDoors; i++)
@@ -142,15 +116,16 @@ namespace RFTestTaskMaze
                 doorColumns.Add(doorColumn);
             }
             
+            // build the wall
             for (int x = field.x; x < field.max.x; x++)
             {
                 if (doorColumns.Contains(x)) continue;
                 
-                if (_gridManager.TryGetTile(x, field.y + cutRow, out Tile tile))
+                if (_mazeManager.TryGetTile(x, field.y + cutRow, out Tile tile))
                 {
                     tile.ToggleSelected(true);
                     tile.BuildWall(direction);
-                    if (_gridManager.TryGetTile(x + direction.ToDirectionVector().x, field.y + cutRow + direction.ToDirectionVector().y, out Tile neighbour))
+                    if (_mazeManager.TryGetTile(x + direction.ToDirectionVector().x, field.y + cutRow + direction.ToDirectionVector().y, out Tile neighbour))
                     {
                         neighbour.BuildWall(direction.OppositeDirection());
                     }
@@ -164,6 +139,7 @@ namespace RFTestTaskMaze
         {
             Direction direction = Direction.Left;
 
+            // decide how many times and where to punch some holes in the future wall
             List<int> doorRows = new List<int>();
             int numberOfDoors = Random.Range(Mathf.Max(1, field.height / 25), field.height / 10);
             for (int i = 0; i < numberOfDoors; i++)
@@ -172,15 +148,16 @@ namespace RFTestTaskMaze
                 doorRows.Add(doorRow);
             }
 
+            // build the wall
             for (int y = field.y; y < field.max.y; y++)
             {
                 if (doorRows.Contains(y)) continue;
 
-                if (_gridManager.TryGetTile(field.x + cutColumn, y, out Tile tile))
+                if (_mazeManager.TryGetTile(field.x + cutColumn, y, out Tile tile))
                 {
                     tile.ToggleSelected(true);
                     tile.BuildWall(direction);
-                    if (_gridManager.TryGetTile(field.x + cutColumn + direction.ToDirectionVector().x,
+                    if (_mazeManager.TryGetTile(field.x + cutColumn + direction.ToDirectionVector().x,
                             y + direction.ToDirectionVector().y, out Tile neighbour))
                     {
                         neighbour.BuildWall(direction.OppositeDirection());
@@ -193,22 +170,24 @@ namespace RFTestTaskMaze
         
         private CutAxis GetRandomCutAxis(RectInt subfield)
         {
+            // some fine-tuning to avoid overly long corridors and axis bias (perhaps expose parameters to inspector?)
             float maxCorridorRatio = 4;
             
             if (_horizontalCounter > 2 || subfield.height >= subfield.width * maxCorridorRatio)
             {
                 _horizontalCounter = 0;
-                return CutAxis.Vertical;
+                return CutAxis.Horizontal;
             }
 
             if (_verticalCounter > 2 || subfield.width >= subfield.height * maxCorridorRatio)
             {
                 _verticalCounter = 0;
-                return CutAxis.Horizontal;
+                return CutAxis.Vertical;
             }
             
-            CutAxis newAxis = Random.Range(0, 2) == 1 ? CutAxis.Vertical : CutAxis.Horizontal;
-            if (newAxis == CutAxis.Vertical)
+            // get random axis
+            CutAxis newAxis = Random.Range(0, 2) == 1 ? CutAxis.Horizontal : CutAxis.Vertical;
+            if (newAxis == CutAxis.Horizontal)
             {
                 _verticalCounter++;
             }

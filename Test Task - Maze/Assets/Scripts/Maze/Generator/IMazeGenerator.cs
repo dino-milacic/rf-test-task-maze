@@ -4,6 +4,6 @@ namespace RFTestTaskMaze
 {
     public interface IMazeGenerator
     {
-        IEnumerator GenerateMaze(IGridManager gridManager, int width, int height);
+        IEnumerator GenerateMaze(IMazeManager mazeManager, int width, int height);
     }
 }

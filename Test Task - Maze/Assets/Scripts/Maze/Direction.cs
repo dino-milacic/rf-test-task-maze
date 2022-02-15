@@ -1,6 +1,4 @@
-﻿using System;
-
-namespace RFTestTaskMaze
+﻿namespace RFTestTaskMaze
 {
     public enum Direction
     {
