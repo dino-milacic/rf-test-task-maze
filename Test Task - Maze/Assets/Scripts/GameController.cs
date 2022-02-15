@@ -52,7 +52,7 @@ namespace RFTestTaskMaze
                 _mazeManager.ResetSolution();
             }
             
-            if (Input.GetKeyUp(KeyCode.KeypadEnter))
+            if (Input.GetKeyUp(KeyCode.Return))
             {
                 _mazeManager.SolveMaze();
             }
